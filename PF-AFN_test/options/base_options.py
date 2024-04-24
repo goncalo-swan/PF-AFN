@@ -19,6 +19,7 @@ class BaseOptions():
         self.parser.add_argument('--fineSize', type=int, default=512, help='then crop to this size')
         self.parser.add_argument('--input_nc', type=int, default=3, help='# of input image channels')
         self.parser.add_argument('--output_nc', type=int, default=3, help='# of output image channels')
+        self.parser.add_argument('--label_nc', type=int, default=20, help='# of input label channels')
 
         self.parser.add_argument('--dataroot', type=str,
                                  default='dataset/') 
@@ -47,6 +48,8 @@ class BaseOptions():
                 self.opt.gpu_ids.append(id)
 
         if len(self.opt.gpu_ids) > 0:
+            print(self.opt.gpu_ids[0])
+            print(torch.cuda.device_count())
             torch.cuda.set_device(self.opt.gpu_ids[0])
 
         args = vars(self.opt)
