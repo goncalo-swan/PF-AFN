@@ -1,3 +1,8 @@
 checkpoints/
 my_downloads/
 */__pycache__/*
+.DS_Store
+PF-AFN_test/dataset-bkup/*
+*.pyc
+PF-AFN_test/dataset/*
+.idea/

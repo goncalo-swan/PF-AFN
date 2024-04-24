@@ -10,24 +10,12 @@ import os.path as osp
 import numpy as np
 
 
-def untransform(img_tensor):
-    from torchvision.transforms.functional import to_pil_image
-    mean = torch.tensor([0.5, 0.5, 0.5]).view(3, 1, 1)
-    std = torch.tensor([0.5, 0.5, 0.5]).view(3, 1, 1)
-    img_denormalized = img_tensor * std + mean  # Apply the inverse of the normalization
-
-    # Step 2: Convert to a PIL image
-    # Make sure the pixel values are in [0,1] by clipping
-    img_denormalized = torch.clamp(img_denormalized, 0, 1).cpu()
-    pil_img = to_pil_image(img_denormalized)
-    return pil_img
-
 class CPDataset(data.Dataset):
     """
         Dataset for CP-VTON.
     """
 
-    def __init__(self, dataroot, image_size=512, mode='train', semantic_nc=13, unpaired=False):
+    def __init__(self, dataroot, image_size=512, mode='train', semantic_nc=13):
         super(CPDataset, self).__init__()
         # base setting
         self.root = dataroot
@@ -37,6 +25,7 @@ class CPDataset(data.Dataset):
         self.fine_width = int(image_size / 256 * 192)
         self.semantic_nc = semantic_nc
         self.data_path = osp.join(dataroot, mode)
+        self.toTensor = transforms.ToTensor()
         self.transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
@@ -54,7 +43,6 @@ class CPDataset(data.Dataset):
         self.c_names = dict()
         self.c_names['paired'] = im_names
         self.c_names['unpaired'] = c_names
-        self.unpaired= unpaired
 
     def name(self):
         return "CPDataset"
@@ -133,13 +121,11 @@ class CPDataset(data.Dataset):
 
     def __getitem__(self, index):
         im_name = self.im_names[index]
-        im_name_orig = im_name
         im_name = 'image/' + im_name
         c_name = {}
         c = {}
         cm = {}
-        keys = ['unpaired'] if self.unpaired else ['paired']
-        for key in keys:
+        for key in ['paired']:
             c_name[key] = self.c_names[key][index]
             c[key] = Image.open(osp.join(self.data_path, 'cloth', c_name[key])).convert('RGB')
             c[key] = transforms.Resize(self.fine_width, interpolation=2)(c[key])
@@ -234,9 +220,19 @@ class CPDataset(data.Dataset):
 
         # agnostic
         agnostic = self.get_agnostic(im_pil_big, im_parse_pil_big, pose_data)
-        agnostic.save(osp.join(self.data_path, "agnostic-v3.2" , im_name_orig))
         agnostic = transforms.Resize(self.fine_width, interpolation=2)(agnostic)
         agnostic = self.transform(agnostic)
+        
+        # warped_cloth_name = im_name.replace('image', 'cloth-warp')
+        # warped_cloth = Image.open(osp.join(self.data_path, warped_cloth_name))
+        # warped_cloth = transforms.Resize(self.fine_width, interpolation=2)(warped_cloth)
+        # warped_cloth = self.transform(warped_cloth)
+        #
+        # warped_cloth_mask_name = im_name.replace('image', 'cloth-warp-mask')
+        # warped_cloth_mask = Image.open(osp.join(self.data_path, warped_cloth_mask_name))
+        # warped_cloth_mask = transforms.Resize(self.fine_width, interpolation=transforms.InterpolationMode.NEAREST) \
+        #     (warped_cloth_mask)
+        # warped_cloth_mask = self.toTensor(warped_cloth_mask)
 
         # to_img = transforms.ToPILImage()
         # to_img((c['paired'] + 1) / 2.0).save('cloth.jpg')
@@ -244,32 +240,6 @@ class CPDataset(data.Dataset):
         # to_img((pose_map + 1) / 2.0).save('pose.jpg')
         # to_img((agnostic + 1) / 2.0).save('agnostic.jpg')
         # to_img((im_c + 1) / 2.0).save('warped_cloth.jpg')
-
-        import cv2
-        # cv2.imshow("c", np.array(untransform(c[key])))
-        # cv2.waitKey(0)
-        # cv2.imshow("cm", np.array(untransform(cm[key])))
-        # cv2.waitKey(0)
-        # cv2.imshow(f"new_p_a_map_0", np.array(untransform(new_parse_agnostic_map[0]))[:, :, ::-1])
-        # cv2.waitKey(0)
-        # cv2.imshow("dense", np.array(untransform(densepose_map))[:, :, ::-1])
-        # cv2.waitKey(0)
-        # cv2.imshow("pose", np.array(untransform(pose_map))[:, :, ::-1])
-        # cv2.waitKey(0)
-        # cv2.imshow("agn", np.array(untransform(agnostic))[:, :, ::-1])
-        # cv2.waitKey(0)
-        # cv2.imshow("parse_onehot", np.array(untransform(parse_onehot))[:, :, ::-1])
-        # cv2.waitKey(0)
-        # cv2.imshow(f"new_p_map_0", np.array(untransform(new_parse_map[0]))[:, :, ::-1])
-        # cv2.waitKey(0)
-        # cv2.imshow("pcm", np.array(untransform(pcm))[:, :, ::-1])
-        # cv2.waitKey(0)
-        # cv2.imshow("im_c", np.array(untransform(im_c))[:, :, ::-1])
-        # cv2.waitKey(0)
-        # cv2.imshow("im", np.array(untransform(im))[:, :, ::-1])
-        # cv2.waitKey(0)
-
-
         result = {
             'c_name': c_name,  # for visualization
             'im_name': im_name,  # for visualization or ground truth
@@ -289,7 +259,8 @@ class CPDataset(data.Dataset):
             'parse_cloth': im_c,  # VGG Loss & vis
             # visualization & GT
             'image': im,  # for visualization
-            'image_name': self.im_names[index]
+            #'warped_cloth': warped_cloth,
+            #'warped_cloth_mask': warped_cloth_mask
         }
 
         return result
