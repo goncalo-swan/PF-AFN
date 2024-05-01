@@ -294,8 +294,8 @@ class CPDataset(data.Dataset):
 
     def __getitem__(self, index):
         im_name = self.im_names[index]
-        im_name = 'image/' + im_name
         im_name_orig = im_name
+        im_name = 'image/' + im_name
         c_name = {}
         c = {}
         cm = {}
