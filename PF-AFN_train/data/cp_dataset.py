@@ -15,7 +15,7 @@ class CPDataset(data.Dataset):
         Dataset for CP-VTON.
     """
 
-    def __init__(self, dataroot, image_size=512, mode='train', semantic_nc=13):
+    def __init__(self, dataroot, image_size=512, mode='train', semantic_nc=13, garment_type="top"):
         super(CPDataset, self).__init__()
         # base setting
         self.root = dataroot
@@ -25,10 +25,10 @@ class CPDataset(data.Dataset):
         self.fine_width = int(image_size / 256 * 192)
         self.semantic_nc = semantic_nc
         self.data_path = osp.join(dataroot, mode)
-        self.toTensor = transforms.ToTensor()
         self.transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+        self.garment_type = garment_type
 
         # load data list
         im_names = []
@@ -47,7 +47,7 @@ class CPDataset(data.Dataset):
     def name(self):
         return "CPDataset"
 
-    def get_agnostic(self, im, im_parse, pose_data):
+    def get_agnostic_upper(self, im, im_parse, pose_data):
         parse_array = np.array(im_parse)
         parse_head = ((parse_array == 4).astype(np.float32) +
                       (parse_array == 13).astype(np.float32))
@@ -119,9 +119,183 @@ class CPDataset(data.Dataset):
         agnostic.paste(im, None, Image.fromarray(np.uint8(parse_lower * 255), 'L'))
         return agnostic
 
+    def get_agnostic_lower(self, im, im_parse, pose_data):
+        parse_array = np.array(im_parse)
+        agnostic = im.copy()
+        agnostic_draw = ImageDraw.Draw(agnostic)
+
+        length_a = np.linalg.norm(pose_data[9] - pose_data[12]) * 3
+        r = int(length_a / 16) + 1
+        if r > 35: r = 35
+        if r < 15: r = 15
+
+        # mask legs
+        for i in [9, 12]:
+            if pose_data[i, 0] == 0.0 and pose_data[i, 1] == 0.0:
+                continue
+            pointx, pointy = pose_data[i]
+            agnostic_draw.ellipse((pointx - r * 3, pointy - r * 6, pointx + r * 3, pointy + r * 6), 'gray', 'gray')
+
+        agnostic_draw.line([tuple(pose_data[i]) for i in [11, 9] if pose_data[i, 0] != 0 and pose_data[i, 1] != 0], 'gray', width=r * 6)
+        agnostic_draw.line([tuple(pose_data[i]) for i in [14, 12] if pose_data[i, 0] != 0 and pose_data[i, 1] != 0], 'gray', width=r * 6)
+        agnostic_draw.line([tuple(pose_data[i]) for i in [9, 12] if pose_data[i, 0] != 0 and pose_data[i, 1] != 0], 'gray', width=r * 12)
+        try:
+            agnostic_draw.polygon([tuple(pose_data[i]) for i in [11, 14, 12, 9] if pose_data[i, 0] != 0 and pose_data[i, 1] != 0], 'gray', 'gray')
+        except:
+            pass
+
+        # mask legs
+        for i in [9, 12]:
+            if pose_data[i, 0] == 0.0 and pose_data[i, 1] == 0.0:
+                continue
+            pointx, pointy = pose_data[i]
+            agnostic_draw.ellipse((pointx - r * 5, pointy - r * 6, pointx + r * 5, pointy + r * 6), 'gray', 'gray')
+        for i in [10, 11, 13, 14]:
+            if (pose_data[i - 1, 0] == 0.0 and pose_data[i - 1, 1] == 0.0) or (
+                    pose_data[i, 0] == 0.0 and pose_data[i, 1] == 0.0):
+                continue
+            agnostic_draw.line([tuple(pose_data[j]) for j in [i - 1, i]], 'gray', width=r * 10)
+            pointx, pointy = pose_data[i]
+            agnostic_draw.ellipse((pointx - r * 5, pointy - r * 5, pointx + r * 5, pointy + r * 5), 'gray', 'gray')
+
+        for parse_ids, pose_ids in [([16, 18], [12, 13, 14]), ([17, 19], [9, 10, 11])]:
+            mask_leg = Image.new('L', (768, 1024), 'white')
+            mask_leg_draw = ImageDraw.Draw(mask_leg)
+            pointx, pointy = pose_data[pose_ids[0]]
+            mask_leg_draw.ellipse((pointx - r * 5, pointy - r * 6, pointx + r * 5, pointy + r * 6), 'black', 'black')
+            for i in pose_ids[1:]:
+                if (pose_data[i - 1, 0] == 0.0 and pose_data[i - 1, 1] == 0.0) or (
+                        pose_data[i, 0] == 0.0 and pose_data[i, 1] == 0.0):
+                    continue
+                mask_leg_draw.line([tuple(pose_data[j]) for j in [i - 1, i]], 'black', width=r * 10)
+                pointx, pointy = pose_data[i]
+                if i != pose_ids[-1]:
+                    mask_leg_draw.ellipse((pointx - r * 5, pointy - r * 5, pointx + r * 5, pointy + r * 5), 'black',
+                                          'black')
+            # mask_leg_draw.ellipse((pointx - r * 4, pointy - r * 4, pointx + r * 4, pointy + r * 4), 'black', 'black')
+            for parse_id in parse_ids:
+                parse_leg = (np.array(mask_leg) / 255) * (parse_array == parse_id).astype(np.float32)
+                agnostic.paste(im, None, Image.fromarray(np.uint8(parse_leg * 255), 'L'))
+
+        # agnostic.paste(im, None, Image.fromarray(np.uint8(parse_upper * 255), 'L'))
+        return agnostic
+
+    def get_agnostic_full(self, im, im_parse, pose_data):
+        agnostic = im.copy()
+        agnostic_draw = ImageDraw.Draw(agnostic)
+
+        parse_array = np.array(im_parse)
+        parse_head = ((parse_array == 4).astype(np.float32) +
+                      (parse_array == 13).astype(np.float32))
+
+        length_a = np.linalg.norm(pose_data[5] - pose_data[2])
+        length_b = np.linalg.norm(pose_data[12] - pose_data[9])
+        point = (pose_data[9] + pose_data[12]) / 2
+        pose_data[9] = point + (pose_data[9] - point) / length_b * length_a
+        pose_data[12] = point + (pose_data[12] - point) / length_b * length_a
+
+        r = int(length_a / 16) + 1
+
+        # mask torso
+        for i in [9, 12]:
+            pointx, pointy = pose_data[i]
+            agnostic_draw.ellipse((pointx - r * 3, pointy - r * 6, pointx + r * 3, pointy + r * 6), 'gray', 'gray')
+        agnostic_draw.line([tuple(pose_data[i]) for i in [2, 9]], 'gray', width=r * 6)
+        agnostic_draw.line([tuple(pose_data[i]) for i in [5, 12]], 'gray', width=r * 6)
+        agnostic_draw.line([tuple(pose_data[i]) for i in [9, 12]], 'gray', width=r * 12)
+        agnostic_draw.polygon([tuple(pose_data[i]) for i in [2, 5, 12, 9]], 'gray', 'gray')
+
+        # mask neck
+        pointx, pointy = pose_data[1]
+        agnostic_draw.rectangle((pointx - r * 5, pointy - r * 9, pointx + r * 5, pointy), 'gray', 'gray')
+
+        pose_data[9][1] = pose_data[9][1] - 0.1 * (pose_data[9][1] - pose_data[2][1])
+        pose_data[12][1] = pose_data[12][1] - 0.1 * (pose_data[12][1] - pose_data[5][1])
+
+        # mask legs
+        for i in [9, 12]:
+            pointx, pointy = pose_data[i]
+            agnostic_draw.ellipse((pointx - r * 3, pointy - r * 6, pointx + r * 3, pointy + r * 6), 'gray', 'gray')
+        agnostic_draw.line([tuple(pose_data[i]) for i in [11, 9]], 'gray', width=r * 6)
+        agnostic_draw.line([tuple(pose_data[i]) for i in [14, 12]], 'gray', width=r * 6)
+        agnostic_draw.line([tuple(pose_data[i]) for i in [9, 12]], 'gray', width=r * 12)
+        agnostic_draw.polygon([tuple(pose_data[i]) for i in [11, 14, 12, 9]], 'gray', 'gray')
+
+        # mask legs
+        for i in [9, 12]:
+            pointx, pointy = pose_data[i]
+            agnostic_draw.ellipse((pointx - r * 5, pointy - r * 6, pointx + r * 5, pointy + r * 6), 'gray', 'gray')
+        for i in [10, 11, 13, 14]:
+            if (pose_data[i - 1, 0] == 0.0 and pose_data[i - 1, 1] == 0.0) or (
+                    pose_data[i, 0] == 0.0 and pose_data[i, 1] == 0.0):
+                continue
+            agnostic_draw.line([tuple(pose_data[j]) for j in [i - 1, i]], 'gray', width=r * 10)
+            pointx, pointy = pose_data[i]
+            agnostic_draw.ellipse((pointx - r * 5, pointy - r * 5, pointx + r * 5, pointy + r * 5), 'gray', 'gray')
+
+        for parse_ids, pose_ids in [([16, 18], [12, 13, 14]), ([17, 19], [9, 10, 11])]:
+            mask_leg = Image.new('L', (768, 1024), 'white')
+            mask_leg_draw = ImageDraw.Draw(mask_leg)
+            pointx, pointy = pose_data[pose_ids[0]]
+            mask_leg_draw.ellipse((pointx - r * 5, pointy - r * 6, pointx + r * 5, pointy + r * 6), 'black', 'black')
+            for i in pose_ids[1:]:
+                if (pose_data[i - 1, 0] == 0.0 and pose_data[i - 1, 1] == 0.0) or (
+                        pose_data[i, 0] == 0.0 and pose_data[i, 1] == 0.0):
+                    continue
+                mask_leg_draw.line([tuple(pose_data[j]) for j in [i - 1, i]], 'black', width=r * 10)
+                pointx, pointy = pose_data[i]
+                if i != pose_ids[-1]:
+                    mask_leg_draw.ellipse((pointx - r * 5, pointy - r * 5, pointx + r * 5, pointy + r * 5), 'black',
+                                          'black')
+            mask_leg_draw.ellipse((pointx - r * 4, pointy - r * 4, pointx + r * 4, pointy + r * 4), 'black', 'black')
+            for parse_id in parse_ids:
+                parse_leg = (np.array(mask_leg) / 255) * (parse_array == parse_id).astype(np.float32)
+                agnostic.paste(im, None, Image.fromarray(np.uint8(parse_leg * 255), 'L'))
+
+            # mask arms
+            agnostic_draw.line([tuple(pose_data[i]) for i in [2, 5]], 'gray', width=r * 12)
+            for i in [2, 5]:
+                pointx, pointy = pose_data[i]
+                agnostic_draw.ellipse((pointx - r * 5, pointy - r * 6, pointx + r * 5, pointy + r * 6), 'gray',
+                                      'gray')
+            for i in [3, 4, 6, 7]:
+                if (pose_data[i - 1, 0] == 0.0 and pose_data[i - 1, 1] == 0.0) or (
+                        pose_data[i, 0] == 0.0 and pose_data[i, 1] == 0.0):
+                    continue
+                agnostic_draw.line([tuple(pose_data[j]) for j in [i - 1, i]], 'gray', width=r * 10)
+                pointx, pointy = pose_data[i]
+                agnostic_draw.ellipse((pointx - r * 5, pointy - r * 5, pointx + r * 5, pointy + r * 5), 'gray',
+                                      'gray')
+
+            for parse_id, pose_ids in [(14, [5, 6, 7]), (15, [2, 3, 4])]:
+                mask_arm = Image.new('L', (768, 1024), 'white')
+                mask_arm_draw = ImageDraw.Draw(mask_arm)
+                pointx, pointy = pose_data[pose_ids[0]]
+                mask_arm_draw.ellipse((pointx - r * 5, pointy - r * 6, pointx + r * 5, pointy + r * 6), 'black',
+                                      'black')
+                for i in pose_ids[1:]:
+                    if (pose_data[i - 1, 0] == 0.0 and pose_data[i - 1, 1] == 0.0) or (
+                            pose_data[i, 0] == 0.0 and pose_data[i, 1] == 0.0):
+                        continue
+                    mask_arm_draw.line([tuple(pose_data[j]) for j in [i - 1, i]], 'black', width=r * 10)
+                    pointx, pointy = pose_data[i]
+                    if i != pose_ids[-1]:
+                        mask_arm_draw.ellipse((pointx - r * 5, pointy - r * 5, pointx + r * 5, pointy + r * 5),
+                                              'black',
+                                              'black')
+                mask_arm_draw.ellipse((pointx - r * 4, pointy - r * 4, pointx + r * 4, pointy + r * 4), 'black',
+                                      'black')
+
+                parse_arm = (np.array(mask_arm) / 255) * (parse_array == parse_id).astype(np.float32)
+                agnostic.paste(im, None, Image.fromarray(np.uint8(parse_arm * 255), 'L'))
+
+        agnostic.paste(im, None, Image.fromarray(np.uint8(parse_head * 255), 'L'))
+        return agnostic
+
     def __getitem__(self, index):
         im_name = self.im_names[index]
         im_name = 'image/' + im_name
+        im_name_orig = im_name
         c_name = {}
         c = {}
         cm = {}
@@ -140,11 +314,15 @@ class CPDataset(data.Dataset):
 
         # person image
         im_pil_big = Image.open(osp.join(self.data_path, im_name))
+        if im_pil_big.mode != 'RGB':
+            im_pil_big = im_pil_big.convert('RGB')
         im_pil = transforms.Resize(self.fine_width, interpolation=2)(im_pil_big)
         im = self.transform(im_pil)
 
+        suffix = '.' + im_name.split('.')[-1]
+
         # load parsing image
-        parse_name = im_name.replace('image', 'image-parse-v3').replace('.jpg', '.png')
+        parse_name = im_name.replace('image', 'image-parse-v3').replace(suffix, '.png')
         im_parse_pil_big = Image.open(osp.join(self.data_path, parse_name))
         im_parse_pil = transforms.Resize(self.fine_width, interpolation=0)(im_parse_pil_big)
         parse = torch.from_numpy(np.array(im_parse_pil)[None]).long()
@@ -195,17 +373,24 @@ class CPDataset(data.Dataset):
                 new_parse_agnostic_map[i] += parse_agnostic_map[label]
 
         # parse cloth & parse cloth mask
-        pcm = new_parse_map[3:4]
+        if self.garment_type == "top":
+            pcm = new_parse_map[3:4]
+        elif self.garment_type == "bottom":
+            pcm = new_parse_map[4:5]
+        elif self.garment_type == "full":
+            pcm = new_parse_map[3:5]
+        else:
+            raise ValueError(f"Unknown garment type: {self.garment_type}")
         im_c = im * pcm + (1 - pcm)
 
         # load pose points
-        pose_name = im_name.replace('image', 'openpose_img').replace('.jpg', '_rendered.png')
+        pose_name = im_name.replace('image', 'openpose_img').replace(suffix, '_rendered.png')
         pose_map = Image.open(osp.join(self.data_path, pose_name))
         pose_map = transforms.Resize(self.fine_width, interpolation=2)(pose_map)
         pose_map = self.transform(pose_map)  # [-1,1]
 
         # pose name
-        pose_name = im_name.replace('image', 'openpose_json').replace('.jpg', '_keypoints.json')
+        pose_name = im_name.replace('image', 'openpose_json').replace(suffix, '_keypoints.json')
         with open(osp.join(self.data_path, pose_name), 'r') as f:
             pose_label = json.load(f)
             pose_data = pose_label['people'][0]['pose_keypoints_2d']
@@ -219,20 +404,16 @@ class CPDataset(data.Dataset):
         densepose_map = self.transform(densepose_map)  # [-1,1]
 
         # agnostic
-        agnostic = self.get_agnostic(im_pil_big, im_parse_pil_big, pose_data)
+        if self.garment_type == "top":
+            agnostic = self.get_agnostic_upper(im_pil_big, im_parse_pil_big, pose_data)
+        elif self.garment_type == "bottom":
+            agnostic = self.get_agnostic_lower(im_pil_big, im_parse_pil_big, pose_data)
+        elif self.garment_type == "full":
+            agnostic = self.get_agnostic_full(im_pil_big, im_parse_pil_big, pose_data)
+
+        agnostic.save(osp.join(self.data_path, "agnostic-v3.2", im_name_orig))
         agnostic = transforms.Resize(self.fine_width, interpolation=2)(agnostic)
         agnostic = self.transform(agnostic)
-        
-        # warped_cloth_name = im_name.replace('image', 'cloth-warp')
-        # warped_cloth = Image.open(osp.join(self.data_path, warped_cloth_name))
-        # warped_cloth = transforms.Resize(self.fine_width, interpolation=2)(warped_cloth)
-        # warped_cloth = self.transform(warped_cloth)
-        #
-        # warped_cloth_mask_name = im_name.replace('image', 'cloth-warp-mask')
-        # warped_cloth_mask = Image.open(osp.join(self.data_path, warped_cloth_mask_name))
-        # warped_cloth_mask = transforms.Resize(self.fine_width, interpolation=transforms.InterpolationMode.NEAREST) \
-        #     (warped_cloth_mask)
-        # warped_cloth_mask = self.toTensor(warped_cloth_mask)
 
         # to_img = transforms.ToPILImage()
         # to_img((c['paired'] + 1) / 2.0).save('cloth.jpg')
@@ -259,8 +440,7 @@ class CPDataset(data.Dataset):
             'parse_cloth': im_c,  # VGG Loss & vis
             # visualization & GT
             'image': im,  # for visualization
-            #'warped_cloth': warped_cloth,
-            #'warped_cloth_mask': warped_cloth_mask
+            'image_name': self.im_names[index]
         }
 
         return result

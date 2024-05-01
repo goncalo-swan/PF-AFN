@@ -19,7 +19,7 @@ os.makedirs(path, exist_ok=True)
 
 def CreateDataset(opt):
     from data.cp_dataset import CPDataset
-    dataset = CPDataset(opt.dataroot, mode='train', image_size=256)
+    dataset = CPDataset(opt.dataroot, mode='train', image_size=256, garment_type=opt.garment_type)
     # print("dataset [%s] was created" % (dataset.name()))
     # dataset.initialize(opt)
     return dataset

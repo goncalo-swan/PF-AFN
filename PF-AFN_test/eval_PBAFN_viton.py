@@ -15,7 +15,7 @@ from options.test_options import TestOptions
 
 def CreateDataset(opt):
     from data.cp_dataset import CPDataset
-    dataset = CPDataset(opt.dataroot, mode=opt.phase, image_size=opt.fineSize, unpaired=opt.unpaired)
+    dataset = CPDataset(opt.dataroot, mode=opt.phase, image_size=opt.fineSize, unpaired=opt.unpaired, garment_type=opt.garment_type)
     # print("dataset [%s] was created" % (dataset.name()))
     # dataset.initialize(opt)
     return dataset
